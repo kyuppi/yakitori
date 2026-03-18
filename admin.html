@@ -95,7 +95,7 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, collection, onSnapshot, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // Global values provided by environment
@@ -103,6 +103,7 @@
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
+        
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'yakitori-himawari-main';
 
         const MENU = [
@@ -111,20 +112,22 @@
             { id: 'm5', name: '豚レバー' }, { id: 'm6', name: 'カシラ' },
             { id: 'm7', name: '豚タン' }, { id: 'm8', name: '豚白モツ' },
             { id: 'm9', name: '鶏皮' }, { id: 'm10', name: 'つくね' },
-            { id: 'm11', name: 'むねニンニク' },
+            { id: 'm11', name: 'むね肉ニンニク' },
         ];
 
         let soldOutItems = {};
         let currentUser = null;
         let isAuthReady = false;
+        let unsubscribeInventory = null;
+        let unsubscribeReservations = null;
 
         window.onload = function() {
             lucide.createIcons();
             
             const loginBtn = document.getElementById('login-btn');
             loginBtn.onclick = function() {
-                if (!isAuthReady) {
-                    alert("データベース接続を待っています。もう一度お試しください。");
+                if (!isAuthReady || !currentUser) {
+                    alert("サーバーとの接続を確立しています。数秒待ってからやり直してください。");
                     return;
                 }
                 const passInput = document.getElementById('admin-pass-input').value;
@@ -134,31 +137,30 @@
                     document.getElementById('login-overlay').classList.add('hidden');
                     document.getElementById('admin-main').classList.remove('hidden');
                     errorMsg.classList.add('hidden');
-                    // ログイン成功後にデータの読み込みを開始
+                    // ログイン成功後に認証済みユーザーとして同期を開始
                     startDataSync();
                 } else {
                     errorMsg.classList.remove('hidden');
-                    document.getElementById('admin-pass-input').classList.add('border-red-600');
-                    setTimeout(() => {
-                        document.getElementById('admin-pass-input').classList.remove('border-red-600');
-                    }, 500);
                 }
             };
 
             document.getElementById('tab-inventory-btn').onclick = () => switchTab('inventory');
             document.getElementById('tab-reservations-btn').onclick = () => switchTab('reservations');
             
-            // 認証プロセスの開始
             initAuthProcess();
         };
 
         async function initAuthProcess() {
             try {
-                // 匿名認証を実行
-                await signInAnonymously(auth);
+                // RULE 3: Auth Before Queries
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
             } catch (err) {
                 console.error("Auth Failed:", err);
-                document.getElementById('loading-text').innerText = "接続に失敗しました。再読み込みしてください。";
+                document.getElementById('loading-text').innerText = "接続に失敗しました。ページを再読み込みしてください。";
             }
         }
 
@@ -169,17 +171,23 @@
                 updateBadge(true);
                 hideLoading();
             } else {
+                currentUser = null;
                 isAuthReady = false;
                 updateBadge(false);
             }
         });
 
         function startDataSync() {
+            // 安全策: ユーザーがいない場合は実行しない
             if (!currentUser) return;
             
+            // 以前のリスナーがあれば解除
+            if (unsubscribeInventory) unsubscribeInventory();
+            if (unsubscribeReservations) unsubscribeReservations();
+
             // 在庫同期 (RULE 1: Strict Paths)
             const inventoryRef = doc(db, 'artifacts', appId, 'public', 'data', 'inventory', 'status');
-            onSnapshot(inventoryRef, (snap) => {
+            unsubscribeInventory = onSnapshot(inventoryRef, (snap) => {
                 soldOutItems = snap.exists() ? snap.data().soldOut : {};
                 renderInventory();
             }, (err) => {
@@ -188,11 +196,13 @@
 
             // 予約同期 (RULE 1: Strict Paths)
             const resRef = collection(db, 'artifacts', appId, 'public', 'data', 'reservations');
-            onSnapshot(resRef, (snap) => {
+            unsubscribeReservations = onSnapshot(resRef, (snap) => {
                 const docs = [];
-                snap.forEach(d => docs.push({ id: d.id, ...d.data() }));
+                snap.forEach(d => {
+                    docs.push({ id: d.id, ...d.data() });
+                });
                 
-                // RULE 2: Fetch all and sort in JS
+                // RULE 2: No Complex Queries (JS側でソート)
                 docs.sort((a, b) => {
                     const timeA = a.createdAt?.seconds || 0;
                     const timeB = b.createdAt?.seconds || 0;
@@ -203,7 +213,7 @@
             }, (err) => {
                 console.error("Reservations Sync Error:", err);
                 const msg = document.getElementById('reservation-loading-msg');
-                if (msg) msg.innerText = "データの取得権限がありません。管理者設定を確認してください。";
+                if (msg) msg.innerText = `データの読み込みに失敗しました。権限エラーが発生しています。`;
             });
         }
 
@@ -216,7 +226,7 @@
                     updatedAt: new Date()
                 });
             } catch (err) {
-                alert("在庫の更新に失敗しました: " + err.message);
+                alert("更新失敗: " + err.message);
             }
         };
 
@@ -246,7 +256,9 @@
             }
 
             container.innerHTML = orders.map(order => {
-                const date = order.createdAt?.toDate ? order.createdAt.toDate().toLocaleString('ja-JP') : '日付不明';
+                const dateObj = order.createdAt?.toDate ? order.createdAt.toDate() : null;
+                const timeStr = dateObj ? `${dateObj.getMonth()+1}/${dateObj.getDate()} ${dateObj.getHours()}:${dateObj.getMinutes().toString().padStart(2,'0')}` : '日時不明';
+                
                 const itemsText = Object.entries(order.items || {})
                     .map(([key, qty]) => {
                         const [id, flavor] = key.split('-');
@@ -270,7 +282,7 @@
                         ${itemsText || '注文内容なし'}
                     </div>
                     <div class="flex justify-between items-center pt-1">
-                        <span class="text-[10px] text-stone-600">${date} 注文</span>
+                        <span class="text-[10px] text-stone-600">${timeStr} 注文受付</span>
                         <span class="text-sm font-black text-white italic">¥${(order.total || 0).toLocaleString()}</span>
                     </div>
                 </div>`;
@@ -285,13 +297,9 @@
             const invBtn = document.getElementById('tab-inventory-btn');
             const resBtn = document.getElementById('tab-reservations-btn');
             
-            if (isInv) {
-                invBtn.className = 'flex-1 py-3 rounded-[1.8rem] text-xs font-black transition-all bg-orange-600 text-white';
-                resBtn.className = 'flex-1 py-3 rounded-[1.8rem] text-xs font-black transition-all text-stone-500';
-            } else {
-                invBtn.className = 'flex-1 py-3 rounded-[1.8rem] text-xs font-black transition-all text-stone-500';
-                resBtn.className = 'flex-1 py-3 rounded-[1.8rem] text-xs font-black transition-all bg-orange-600 text-white';
-            }
+            invBtn.className = isInv ? 'flex-1 py-3 rounded-[1.8rem] text-xs font-black transition-all bg-orange-600 text-white' : 'flex-1 py-3 rounded-[1.8rem] text-xs font-black transition-all text-stone-500';
+            resBtn.className = !isInv ? 'flex-1 py-3 rounded-[1.8rem] text-xs font-black transition-all bg-orange-600 text-white' : 'flex-1 py-3 rounded-[1.8rem] text-xs font-black transition-all text-stone-500';
+            
             lucide.createIcons();
         }
 
