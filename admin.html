@@ -19,7 +19,10 @@
     <!-- Loading Screen -->
     <div id="loading-screen" class="fixed inset-0 bg-stone-950 z-[100] flex flex-col items-center justify-center transition-opacity duration-500">
         <div class="loading-spinner mb-4"></div>
-        <div id="loading-text" class="text-[10px] font-black text-orange-600 tracking-[0.2em] uppercase">管理システム接続中...</div>
+        <div id="loading-text" class="text-[10px] font-black text-orange-600 tracking-[0.2em] uppercase text-center px-4">
+            管理システム接続中...<br>
+            <span id="loading-subtext" class="text-stone-600 lowercase mt-2 block font-normal">Authenticating with Firebase</span>
+        </div>
     </div>
 
     <!-- Header -->
@@ -54,27 +57,21 @@
         </div>
     </div>
 
-    <!-- Main Content (Hidden until login) -->
+    <!-- Main Content -->
     <main id="admin-main" class="max-w-xl mx-auto p-4 space-y-8 hidden">
-        
-        <!-- Tab Navigation -->
         <div class="flex bg-stone-900 p-1.5 rounded-[2rem] sticky top-20 z-30 border border-stone-800">
             <button id="tab-inventory-btn" class="flex-1 py-3 rounded-[1.8rem] text-xs font-black transition-all bg-orange-600 text-white">在庫管理</button>
             <button id="tab-reservations-btn" class="flex-1 py-3 rounded-[1.8rem] text-xs font-black transition-all text-stone-500">予約一覧</button>
         </div>
 
-        <!-- Section: Inventory -->
         <section id="section-inventory" class="space-y-6">
             <div class="flex items-center justify-between px-2">
                 <h3 class="text-sm font-black italic text-stone-400">現在の在庫状況</h3>
                 <span class="text-[10px] bg-stone-800 px-2 py-1 rounded text-stone-500 font-bold">全11品目</span>
             </div>
-            <div id="inventory-grid" class="grid grid-cols-2 gap-3">
-                <!-- JSで生成 -->
-            </div>
+            <div id="inventory-grid" class="grid grid-cols-2 gap-3"></div>
         </section>
 
-        <!-- Section: Reservations -->
         <section id="section-reservations" class="hidden space-y-6">
             <div class="flex items-center justify-between px-2">
                 <h3 class="text-sm font-black italic text-stone-400">最新の予約</h3>
@@ -85,7 +82,6 @@
             </div>
         </section>
 
-        <!-- Danger Zone -->
         <div class="pt-10 border-t border-stone-900">
             <button onclick="location.reload()" class="w-full py-4 rounded-2xl border border-stone-800 text-stone-600 font-bold text-xs hover:bg-stone-900">
                 ログアウトして客用画面へ
@@ -98,13 +94,23 @@
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, collection, onSnapshot, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Global values provided by environment
-        const firebaseConfig = JSON.parse(__firebase_config);
+        // 設定いただいたFirebaseの情報を反映
+        const firebaseConfig = {
+            apiKey: "AIzaSyBFHd2b0KlHvpgMi-oax7llhNaQV-yiLq8",
+            authDomain: "yakitori-81aab.firebaseapp.com",
+            projectId: "yakitori-81aab",
+            storageBucket: "yakitori-81aab.firebasestorage.app",
+            messagingSenderId: "765393606286",
+            appId: "1:765393606286:web:755c313fbed6e8ea42dbdf",
+            measurementId: "G-EJJ13648XH"
+        };
+
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
         
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'yakitori-himawari-main';
+        // セキュリティルールと一致させるため固定
+        const appId = 'yakitori-himawari-main';
 
         const MENU = [
             { id: 'm1', name: 'ねぎま' }, { id: 'm2', name: '焼き鳥' },
@@ -118,49 +124,61 @@
         let soldOutItems = {};
         let currentUser = null;
         let isAuthReady = false;
-        let unsubscribeInventory = null;
-        let unsubscribeReservations = null;
+        let syncStarted = false;
+
+        const loadingTimeout = setTimeout(() => {
+            if (!isAuthReady) {
+                const subtext = document.getElementById('loading-subtext');
+                if (subtext) subtext.innerText = "接続に時間がかかっています。FirebaseのAuthentication設定（匿名認証）が有効か確認してください。";
+                hideLoader();
+            }
+        }, 10000);
+
+        function hideLoader() {
+            const loader = document.getElementById('loading-screen');
+            if (loader) {
+                loader.style.opacity = '0';
+                setTimeout(() => loader.classList.add('hidden'), 500);
+            }
+        }
 
         window.onload = function() {
             lucide.createIcons();
-            
             const loginBtn = document.getElementById('login-btn');
             loginBtn.onclick = function() {
                 if (!isAuthReady || !currentUser) {
-                    alert("サーバーとの接続を確立しています。数秒待ってからやり直してください。");
+                    alert("サーバーとの接続が完了していません。しばらく待ってもダメな場合はFirebaseコンソールで「承認済みドメイン」にこのサイトのドメインを追加してください。");
                     return;
                 }
                 const passInput = document.getElementById('admin-pass-input').value;
-                const errorMsg = document.getElementById('login-error-msg');
-                
                 if (passInput === '613613613') {
                     document.getElementById('login-overlay').classList.add('hidden');
                     document.getElementById('admin-main').classList.remove('hidden');
-                    errorMsg.classList.add('hidden');
-                    // ログイン成功後に認証済みユーザーとして同期を開始
-                    startDataSync();
+                    if (!syncStarted) {
+                        startDataSync();
+                        syncStarted = true;
+                    }
                 } else {
-                    errorMsg.classList.remove('hidden');
+                    document.getElementById('login-error-msg').classList.remove('hidden');
                 }
             };
-
             document.getElementById('tab-inventory-btn').onclick = () => switchTab('inventory');
             document.getElementById('tab-reservations-btn').onclick = () => switchTab('reservations');
-            
-            initAuthProcess();
+            initAuth();
         };
 
-        async function initAuthProcess() {
+        async function initAuth() {
             try {
-                // RULE 3: Auth Before Queries
+                // 環境変数がある場合は優先（Canvasプレビュー用）、なければ直接匿名認証
                 if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
                     await signInWithCustomToken(auth, __initial_auth_token);
                 } else {
                     await signInAnonymously(auth);
                 }
             } catch (err) {
-                console.error("Auth Failed:", err);
-                document.getElementById('loading-text').innerText = "接続に失敗しました。ページを再読み込みしてください。";
+                console.error("Auth Error:", err);
+                document.getElementById('loading-text').innerHTML = `接続エラー<br><span class="text-[8px] font-normal">${err.message}</span>`;
+                hideLoader();
             }
         }
 
@@ -168,8 +186,9 @@
             if (user) {
                 currentUser = user;
                 isAuthReady = true;
+                clearTimeout(loadingTimeout);
                 updateBadge(true);
-                hideLoading();
+                hideLoader();
             } else {
                 currentUser = null;
                 isAuthReady = false;
@@ -178,42 +197,23 @@
         });
 
         function startDataSync() {
-            // 安全策: ユーザーがいない場合は実行しない
             if (!currentUser) return;
-            
-            // 以前のリスナーがあれば解除
-            if (unsubscribeInventory) unsubscribeInventory();
-            if (unsubscribeReservations) unsubscribeReservations();
-
-            // 在庫同期 (RULE 1: Strict Paths)
-            const inventoryRef = doc(db, 'artifacts', appId, 'public', 'data', 'inventory', 'status');
-            unsubscribeInventory = onSnapshot(inventoryRef, (snap) => {
+            // 在庫状況の同期
+            onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'inventory', 'status'), (snap) => {
                 soldOutItems = snap.exists() ? snap.data().soldOut : {};
                 renderInventory();
-            }, (err) => {
-                console.error("Inventory Sync Error:", err);
-            });
+            }, (err) => console.error("Inventory Sync Error:", err));
 
-            // 予約同期 (RULE 1: Strict Paths)
-            const resRef = collection(db, 'artifacts', appId, 'public', 'data', 'reservations');
-            unsubscribeReservations = onSnapshot(resRef, (snap) => {
+            // 予約一覧の同期
+            onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'reservations'), (snap) => {
                 const docs = [];
-                snap.forEach(d => {
-                    docs.push({ id: d.id, ...d.data() });
-                });
-                
-                // RULE 2: No Complex Queries (JS側でソート)
-                docs.sort((a, b) => {
-                    const timeA = a.createdAt?.seconds || 0;
-                    const timeB = b.createdAt?.seconds || 0;
-                    return timeB - timeA;
-                });
-                
+                snap.forEach(d => docs.push({ id: d.id, ...d.data() }));
+                docs.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
                 renderReservations(docs);
             }, (err) => {
-                console.error("Reservations Sync Error:", err);
+                console.error("Reservation Sync Error:", err);
                 const msg = document.getElementById('reservation-loading-msg');
-                if (msg) msg.innerText = `データの読み込みに失敗しました。権限エラーが発生しています。`;
+                if (msg) msg.innerText = `エラー: Firestoreのセキュリティルールを確認してください (${err.code})`;
             });
         }
 
@@ -226,20 +226,20 @@
                     updatedAt: new Date()
                 });
             } catch (err) {
-                alert("更新失敗: " + err.message);
+                alert("更新に失敗しました: " + err.message);
             }
         };
 
         function renderInventory() {
             const grid = document.getElementById('inventory-grid');
-            if(!grid) return;
+            if (!grid) return;
             grid.innerHTML = MENU.map(item => {
                 const isSold = soldOutItems[item.id];
                 return `
                 <button onclick="window.toggleStock('${item.id}')" 
                     class="p-6 rounded-[2rem] border-2 transition-all flex flex-col items-center gap-3 active:scale-95 ${isSold ? 'bg-red-950/20 border-red-900 text-red-500' : 'bg-stone-900 border-stone-800 text-stone-300'}">
                     <span class="font-black text-sm">${item.name}</span>
-                    <span class="text-[9px] font-black px-3 py-1 rounded-full uppercase tracking-tighter ${isSold ? 'bg-red-600 text-white' : 'bg-stone-800 text-stone-500'}">
+                    <span class="text-[9px] font-black px-3 py-1 rounded-full ${isSold ? 'bg-red-600 text-white' : 'bg-stone-800 text-stone-500'}">
                         ${isSold ? '売り切れ' : '販売中'}
                     </span>
                 </button>`;
@@ -249,42 +249,31 @@
         function renderReservations(orders) {
             const container = document.getElementById('reservation-list');
             if (!container) return;
-            
             if (orders.length === 0) {
                 container.innerHTML = '<p class="text-center py-10 text-stone-600 text-xs italic">現在、予約はありません</p>';
                 return;
             }
-
             container.innerHTML = orders.map(order => {
                 const dateObj = order.createdAt?.toDate ? order.createdAt.toDate() : null;
-                const timeStr = dateObj ? `${dateObj.getMonth()+1}/${dateObj.getDate()} ${dateObj.getHours()}:${dateObj.getMinutes().toString().padStart(2,'0')}` : '日時不明';
-                
-                const itemsText = Object.entries(order.items || {})
-                    .map(([key, qty]) => {
-                        const [id, flavor] = key.split('-');
-                        const name = MENU.find(m => m.id === id)?.name || id;
-                        return `${name}(${flavor})×${qty}`;
-                    }).join(', ');
-
+                const timeStr = dateObj ? `${dateObj.getMonth()+1}/${dateObj.getDate()} ${dateObj.getHours()}:${dateObj.getMinutes().toString().padStart(2,'0')}` : '---';
+                const itemsText = Object.entries(order.items || {}).map(([key, qty]) => {
+                    const [id, flv] = key.split('-');
+                    const itemName = MENU.find(m => m.id === id)?.name || id;
+                    return `${itemName}(${flv})×${qty}`;
+                }).join(', ');
                 return `
                 <div class="bg-stone-900 border border-stone-800 p-5 rounded-[2rem] space-y-3">
                     <div class="flex justify-between items-start">
                         <div>
-                            <p class="text-xs font-black text-white">${order.name || '名前なし'} 様</p>
-                            <p class="text-[10px] text-stone-500">${order.phone || '電話なし'}</p>
+                            <p class="text-xs font-black text-white">${order.name || '不明'} 様</p>
+                            <p class="text-[10px] text-stone-500">${order.phone || '-'}</p>
                         </div>
                         <div class="text-right">
                             <p class="text-[10px] font-black text-orange-500 italic">${order.date || ''} 受取</p>
-                            <p class="text-[9px] text-stone-600">${order.location || ''}</p>
                         </div>
                     </div>
-                    <div class="p-3 bg-stone-950 rounded-xl text-[11px] text-stone-400 leading-relaxed border border-stone-800/50">
-                        ${itemsText || '注文内容なし'}
-                    </div>
-                    <div class="flex justify-between items-center pt-1">
-                        <span class="text-[10px] text-stone-600">${timeStr} 注文受付</span>
-                        <span class="text-sm font-black text-white italic">¥${(order.total || 0).toLocaleString()}</span>
-                    </div>
+                    <div class="p-3 bg-stone-950 rounded-xl text-[11px] text-stone-400 border border-stone-800/50">${itemsText}</div>
+                    <div class="flex justify-between items-center"><span class="text-[10px] text-stone-600">${timeStr} 注文</span><span class="text-sm font-black text-white italic">¥${(order.total || 0).toLocaleString()}</span></div>
                 </div>`;
             }).join('');
         }
@@ -293,28 +282,16 @@
             const isInv = tab === 'inventory';
             document.getElementById('section-inventory').classList.toggle('hidden', !isInv);
             document.getElementById('section-reservations').classList.toggle('hidden', isInv);
-            
-            const invBtn = document.getElementById('tab-inventory-btn');
-            const resBtn = document.getElementById('tab-reservations-btn');
-            
-            invBtn.className = isInv ? 'flex-1 py-3 rounded-[1.8rem] text-xs font-black transition-all bg-orange-600 text-white' : 'flex-1 py-3 rounded-[1.8rem] text-xs font-black transition-all text-stone-500';
-            resBtn.className = !isInv ? 'flex-1 py-3 rounded-[1.8rem] text-xs font-black transition-all bg-orange-600 text-white' : 'flex-1 py-3 rounded-[1.8rem] text-xs font-black transition-all text-stone-500';
-            
+            document.getElementById('tab-inventory-btn').className = isInv ? 'flex-1 py-3 rounded-[1.8rem] text-xs font-black transition-all bg-orange-600 text-white' : 'flex-1 py-3 rounded-[1.8rem] text-xs font-black transition-all text-stone-500';
+            document.getElementById('tab-reservations-btn').className = !isInv ? 'flex-1 py-3 rounded-[1.8rem] text-xs font-black transition-all bg-orange-600 text-white' : 'flex-1 py-3 rounded-[1.8rem] text-xs font-black transition-all text-stone-500';
             lucide.createIcons();
         }
 
         function updateBadge(ok) {
             const b = document.getElementById('connection-badge');
-            if(!b) return;
-            b.innerText = ok ? 'ONLINE' : 'OFFLINE';
-            b.className = `text-[9px] font-black px-2 py-1 rounded-md uppercase ${ok ? 'bg-stone-800 text-orange-500' : 'bg-red-900 text-white'}`;
-        }
-
-        function hideLoading() {
-            const loader = document.getElementById('loading-screen');
-            if (loader) {
-                loader.style.opacity = '0';
-                setTimeout(() => loader.classList.add('hidden'), 500);
+            if (b) {
+                b.innerText = ok ? 'ONLINE' : 'OFFLINE';
+                b.className = `text-[9px] font-black px-2 py-1 rounded-md ${ok ? 'bg-stone-800 text-orange-500' : 'bg-red-900 text-white'}`;
             }
         }
     </script>
