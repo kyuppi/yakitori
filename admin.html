@@ -19,7 +19,10 @@
     <!-- Loading Screen -->
     <div id="loading-screen" class="fixed inset-0 bg-stone-950 z-[100] flex flex-col items-center justify-center transition-opacity duration-500">
         <div class="loading-spinner mb-4"></div>
-        <div id="loading-text" class="text-[10px] font-black text-orange-600 tracking-[0.2em] uppercase">管理システム接続中...</div>
+        <div id="loading-text" class="text-[10px] font-black text-orange-600 tracking-[0.2em] uppercase text-center px-4">
+            管理システム接続中...<br>
+            <span id="loading-subtext" class="text-stone-600 lowercase mt-2 block font-normal">Waiting for authentication</span>
+        </div>
     </div>
 
     <!-- Header -->
@@ -91,13 +94,36 @@
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, collection, onSnapshot, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Global values provided by environment
-        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        /**
+         * GitHub公開時の設定手順:
+         * 1. firebaseConfig の中身をご自身のFirebase設定（Firebase Consoleで取得）に書き換えてください。
+         * 2. appId を識別子（例: 'yakitori-himawari'）に設定してください。
+         */
+        let firebaseConfig = {};
+        try {
+            if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+                firebaseConfig = JSON.parse(__firebase_config);
+            } else {
+                // 【重要】GitHubで公開する場合、以下の YOUR_... を自分のFirebaseプロジェクトの値に書き換えてください
+                firebaseConfig = {
+                    apiKey: "YOUR_API_KEY",
+                    authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+                    projectId: "YOUR_PROJECT_ID",
+                    storageBucket: "YOUR_PROJECT_ID.appspot.com",
+                    messagingSenderId: "YOUR_SENDER_ID",
+                    appId: "YOUR_APP_ID"
+                };
+            }
+        } catch (e) {
+            console.error("Config Error", e);
+        }
+
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
         
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'my-unique-yakitori-app-id';
+        // 公開時はここを任意の固定文字列（例: 'yakitori-app'）にしてもOK
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'yakitori-himawari-main';
 
         const MENU = [
             { id: 'm1', name: 'ねぎま' }, { id: 'm2', name: '焼き鳥' },
@@ -113,19 +139,34 @@
         let isAuthReady = false;
         let syncStarted = false;
 
+        const loadingTimeout = setTimeout(() => {
+            if (!isAuthReady) {
+                const subtext = document.getElementById('loading-subtext');
+                if (subtext) subtext.innerText = "接続に時間がかかっています。Firebaseの設定を確認してください。";
+                hideLoader();
+            }
+        }, 10000);
+
+        function hideLoader() {
+            const loader = document.getElementById('loading-screen');
+            if (loader) {
+                loader.style.opacity = '0';
+                setTimeout(() => loader.classList.add('hidden'), 500);
+            }
+        }
+
         window.onload = function() {
             lucide.createIcons();
             const loginBtn = document.getElementById('login-btn');
             loginBtn.onclick = function() {
                 if (!isAuthReady || !currentUser) {
-                    alert("サーバーとの接続を待機中です。数秒待ってからやり直してください。");
+                    alert("サーバーとの接続が完了していません。Firebaseの設定を確認してください。");
                     return;
                 }
                 const passInput = document.getElementById('admin-pass-input').value;
                 if (passInput === '613613613') {
                     document.getElementById('login-overlay').classList.add('hidden');
                     document.getElementById('admin-main').classList.remove('hidden');
-                    // ログイン成功時にのみデータ同期を開始（既に認証済み）
                     if (!syncStarted) {
                         startDataSync();
                         syncStarted = true;
@@ -141,7 +182,6 @@
 
         async function initAuth() {
             try {
-                // RULE 3: Auth Before Queries
                 if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
                     await signInWithCustomToken(auth, __initial_auth_token);
                 } else {
@@ -149,7 +189,8 @@
                 }
             } catch (err) {
                 console.error("Auth Error:", err);
-                document.getElementById('loading-text').innerText = "接続エラー: 設定を確認してください";
+                document.getElementById('loading-text').innerHTML = `接続エラー<br><span class="text-[8px] font-normal">Firebaseの設定を確認してください</span>`;
+                hideLoader();
             }
         }
 
@@ -157,12 +198,9 @@
             if (user) {
                 currentUser = user;
                 isAuthReady = true;
+                clearTimeout(loadingTimeout);
                 updateBadge(true);
-                const loader = document.getElementById('loading-screen');
-                if (loader) {
-                    loader.style.opacity = '0';
-                    setTimeout(() => loader.classList.add('hidden'), 500);
-                }
+                hideLoader();
             } else {
                 currentUser = null;
                 isAuthReady = false;
@@ -171,26 +209,21 @@
         });
 
         function startDataSync() {
-            // 安全策: ユーザー認証が完了していない場合は実行しない
             if (!currentUser) return;
-
-            // 在庫同期 (RULE 1)
             onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'inventory', 'status'), (snap) => {
                 soldOutItems = snap.exists() ? snap.data().soldOut : {};
                 renderInventory();
             }, (err) => console.error("Inventory Sync Error:", err));
 
-            // 予約同期 (RULE 1)
             onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'reservations'), (snap) => {
                 const docs = [];
                 snap.forEach(d => docs.push({ id: d.id, ...d.data() }));
-                // RULE 2: クライアント側でソート
                 docs.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
                 renderReservations(docs);
             }, (err) => {
-                console.error("Sync Error:", err);
+                console.error("Reservation Sync Error:", err);
                 const msg = document.getElementById('reservation-loading-msg');
-                if (msg) msg.innerText = `データ取得権限がありません (${err.code})`;
+                if (msg) msg.innerText = `エラー: Firestoreのルールを確認してください (${err.code})`;
             });
         }
 
@@ -235,7 +268,8 @@
                 const timeStr = dateObj ? `${dateObj.getMonth()+1}/${dateObj.getDate()} ${dateObj.getHours()}:${dateObj.getMinutes().toString().padStart(2,'0')}` : '---';
                 const itemsText = Object.entries(order.items || {}).map(([key, qty]) => {
                     const [id, flv] = key.split('-');
-                    return `${MENU.find(m => m.id === id)?.name || id}(${flv})×${qty}`;
+                    const itemName = MENU.find(m => m.id === id)?.name || id;
+                    return `${itemName}(${flv})×${qty}`;
                 }).join(', ');
                 return `
                 <div class="bg-stone-900 border border-stone-800 p-5 rounded-[2rem] space-y-3">
