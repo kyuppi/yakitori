@@ -120,8 +120,8 @@
         const auth = getAuth(app);
         const db = getFirestore(app);
         
-        // Use consistent appId
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'yakitori-81aab';
+        // 客用システム(App.jsx)とIDを統一
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'yakitori-himawari-main';
 
         const MENU = [
             { id: 'm1', name: 'ねぎま' }, { id: 'm2', name: '焼き鳥' }, { id: 'm3', name: '手羽中' },
