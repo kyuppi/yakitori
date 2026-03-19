@@ -108,6 +108,7 @@
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, doc, setDoc, onSnapshot, getDocs, deleteDoc, updateDoc, arrayUnion, arrayRemove } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
+        // Firebaseの設定を固定（GitHub Pagesなど外部ドメインでも動くように）
         const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
             apiKey: "AIzaSyBFHd2b0KlHvpgMi-oax7llhNaQV-yiLq8",
             authDomain: "yakitori-81aab.firebaseapp.com",
@@ -120,7 +121,7 @@
         const auth = getAuth(app);
         const db = getFirestore(app);
         
-        // 客用システム(App.jsx)とIDを統一
+        // 保存先IDを統一
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'yakitori-himawari-main';
 
         const MENU = [
@@ -138,7 +139,6 @@
         async function init() {
             lucide.createIcons();
             
-            // ログインボタン処理に集約
             document.getElementById('login-btn').onclick = async () => {
                 const pass = document.getElementById('pass-input').value;
                 if(pass === '613613613') {
@@ -147,26 +147,29 @@
                     btn.innerText = "認証中...";
 
                     try {
-                        // 1. 認証開始 (Custom Tokenがあれば優先、失敗時は匿名ログインにフォールバック)
+                        // 1. 認証開始 (外部環境ではカスタムトークンが不一致になるため、エラーが出たら即匿名へ)
+                        let loginSuccess = false;
                         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
                             try {
                                 await signInWithCustomToken(auth, __initial_auth_token);
+                                loginSuccess = true;
                             } catch (tokenError) {
-                                console.warn("トークンの不一致を検知しました。匿名ログインに切り替えます:", tokenError);
-                                await signInAnonymously(auth);
+                                console.warn("Canvas Token rejected, falling back to anonymous.");
                             }
-                        } else {
+                        }
+                        
+                        if (!loginSuccess) {
                             await signInAnonymously(auth);
                         }
 
-                        // 2. 認証完了をポーリングで待機 (確実性を上げる)
+                        // 2. 認証完了待機
                         let attempts = 0;
-                        while(!auth.currentUser && attempts < 20) {
+                        while(!auth.currentUser && attempts < 25) {
                             await new Promise(r => setTimeout(r, 200));
                             attempts++;
                         }
 
-                        if (!auth.currentUser) throw new Error("認証に失敗しました。再試行してください。");
+                        if (!auth.currentUser) throw new Error("認証に時間がかかりすぎています。ページを更新してください。");
 
                         // 3. データ同期開始
                         startSync();
@@ -177,7 +180,7 @@
                         
                     } catch (error) {
                         console.error("Login Error:", error);
-                        alert("エラー: " + error.message);
+                        alert("ログインに失敗しました: " + error.message);
                     } finally {
                         btn.disabled = false;
                         btn.innerText = "ログイン";
@@ -217,13 +220,10 @@
         };
 
         function startSync() {
-            // 安全策: 既存の監視があれば解除
             unsubscribes.forEach(unsub => unsub());
             unsubscribes = [];
 
             if (!auth.currentUser) return;
-
-            console.log("Sync started with UID:", auth.currentUser.uid);
 
             // 1. 在庫同期
             unsubscribes.push(onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'inventory', 'status'), 
