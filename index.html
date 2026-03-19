@@ -2,8 +2,15 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>予約 | やきとり ひまわり</title>
+    
+    <!-- PWA Meta Tags -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="ひまわり予約">
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/3063/3063822.png">
+    
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <style>
@@ -11,6 +18,8 @@
         body { font-family: 'Noto Sans JP', sans-serif; -webkit-tap-highlight-color: transparent; }
         .loading-spinner { border: 3px solid rgba(234, 88, 12, 0.1); border-left-color: #ea580c; border-radius: 50%; width: 24px; height: 24px; animation: spin 1s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
+        /* Safe area for notched devices */
+        .safe-pb { padding-bottom: env(safe-area-inset-bottom); }
     </style>
 </head>
 <body class="bg-stone-100 pb-32 text-stone-900">
@@ -21,6 +30,17 @@
             <div class="loading-spinner"></div>
             <p class="text-[10px] font-black text-orange-600 tracking-widest uppercase">Processing...</p>
         </div>
+    </div>
+
+    <!-- 店長用：通知・PWA設定パネル -->
+    <div id="admin-panel" class="hidden bg-stone-900 text-white p-4 text-[11px] space-y-2">
+        <div class="flex justify-between items-center">
+            <span class="font-bold text-orange-500">【店長専用モード】</span>
+            <button onclick="this.parentElement.parentElement.remove()" class="text-stone-500">✕</button>
+        </div>
+        <p>1. 下のボタンで通知を許可してください。</p>
+        <p>2. ブラウザのメニューから「ホーム画面に追加」してください。アプリとして常駐しやすくなります。</p>
+        <button id="enable-notify-btn" class="w-full bg-orange-600 py-2 rounded-lg font-black mt-1">プッシュ通知を有効にする</button>
     </div>
 
     <!-- Header -->
@@ -111,7 +131,7 @@
     </div>
 
     <!-- Footer -->
-    <div id="footer-bar" class="fixed bottom-8 left-4 right-4 z-50">
+    <div id="footer-bar" class="fixed bottom-8 left-4 right-4 z-50 safe-pb">
         <div class="max-w-2xl mx-auto bg-stone-900 text-white p-4 rounded-[2.5rem] shadow-2xl flex items-center gap-4 border border-white/10">
             <div class="pl-4">
                 <span id="total-price" class="text-2xl font-black text-orange-500 italic">¥0</span>
@@ -123,7 +143,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, doc, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, doc, onSnapshot, serverTimestamp, query, limit, orderBy } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyBFHd2b0KlHvpgMi-oax7llhNaQV-yiLq8",
@@ -152,6 +172,7 @@
         let cart = {};
         let soldOutItems = {};
         let holidays = [];
+        let isFirstLoad = true;
 
         onAuthStateChanged(auth, (u) => { 
             if (!u) signInAnonymously(auth); 
@@ -159,6 +180,7 @@
         });
 
         function startSync() {
+            // 在庫と休日
             onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'inventory', 'status'), (snap) => {
                 soldOutItems = snap.exists() ? snap.data().soldOut || {} : {};
                 renderMenu();
@@ -167,6 +189,54 @@
                 holidays = snap.exists() ? snap.data().dates || [] : [];
                 updateUI();
             });
+
+            // 通知監視（店長用）
+            const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'reservations'), orderBy('createdAt', 'desc'), limit(1));
+            onSnapshot(q, (snapshot) => {
+                if (isFirstLoad) {
+                    isFirstLoad = false;
+                    return;
+                }
+                snapshot.docChanges().forEach((change) => {
+                    if (change.type === "added") {
+                        triggerNotification(change.doc.data());
+                    }
+                });
+            });
+
+            checkAdminStatus();
+        }
+
+        // 店長かどうかを簡易判定（通知ボタンの表示制御）
+        function checkAdminStatus() {
+            if (location.search.includes('admin=true') || Notification.permission === "default") {
+                document.getElementById('admin-panel').classList.remove('hidden');
+            }
+        }
+
+        window.requestNotificationPermission = async () => {
+            const permission = await Notification.requestPermission();
+            if (permission === "granted") {
+                document.getElementById('admin-panel').classList.add('hidden');
+                new Notification("通知有効化", { body: "予約が入るとここにお知らせします" });
+            }
+        };
+        document.getElementById('enable-notify-btn').onclick = window.requestNotificationPermission;
+
+        function triggerNotification(data) {
+            if (Notification.permission === "granted") {
+                const n = new Notification("【新着予約】", {
+                    body: `${data.name}様 / ${data.time}受取 / ¥${data.total}`,
+                    icon: "https://cdn-icons-png.flaticon.com/512/3063/3063822.png",
+                    tag: "new-order",
+                    renotify: true
+                });
+                
+                const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+                audio.play().catch(() => console.log("Audio needs interaction"));
+                
+                n.onclick = () => { window.focus(); };
+            }
         }
 
         function renderMenu() {
@@ -218,21 +288,21 @@
             const locationText = document.getElementById('location-text');
             const submitBtn = document.getElementById('submit-btn');
 
-            let location = '日付を選択してください';
+            let locationName = '日付を選択してください';
             let isInvalid = true;
 
             if (dateInput) {
                 if (holidays.includes(dateInput)) {
-                    location = '【臨時定休日】です';
+                    locationName = '【臨時定休日】です';
                     isInvalid = true;
                 } else {
                     const day = new Date(dateInput).getDay();
-                    location = SCHEDULE[day] || '定休日です';
-                    isInvalid = location.includes('定休日');
+                    locationName = SCHEDULE[day] || '定休日です';
+                    isInvalid = locationName.includes('定休日');
                 }
             }
 
-            locationText.innerText = location;
+            locationText.innerText = locationName;
             
             if (isInvalid && dateInput) {
                 locationBox.classList.remove('bg-orange-50', 'border-orange-100', 'text-orange-900');
@@ -250,7 +320,6 @@
                 }
             }
 
-            // 日付、時間、カートの中身が揃っている場合のみボタンを有効化
             submitBtn.disabled = total === 0 || !dateInput || !timeInput || isInvalid;
             renderMenu();
         }
@@ -265,7 +334,6 @@
             const time = document.getElementById('order-time').value;
 
             if (!name || !phone) return alert('お名前と電話番号を入力してください');
-            if (!date || !time) return alert('受取日時を選択してください');
             
             document.getElementById('loading-overlay').classList.remove('hidden');
             const orderId = Math.floor(1000 + Math.random() * 9000).toString();
@@ -277,11 +345,7 @@
 
             try {
                 await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'reservations'), {
-                    orderId,
-                    name,
-                    phone,
-                    date,
-                    time,
+                    orderId, name, phone, date, time,
                     location: document.getElementById('location-text').innerText,
                     items: cart,
                     total,
@@ -294,8 +358,8 @@
                 document.getElementById('success-screen').classList.remove('hidden');
                 window.scrollTo(0,0);
             } catch (e) {
-                console.error("予約エラー:", e);
-                alert("予約に失敗しました。時間をおいて再度お試しください。");
+                console.error(e);
+                alert("予約に失敗しました。");
             } finally {
                 document.getElementById('loading-overlay').classList.add('hidden');
             }
