@@ -18,7 +18,6 @@
         body { font-family: 'Noto Sans JP', sans-serif; -webkit-tap-highlight-color: transparent; }
         .loading-spinner { border: 3px solid rgba(234, 88, 12, 0.1); border-left-color: #ea580c; border-radius: 50%; width: 24px; height: 24px; animation: spin 1s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
-        /* Safe area for notched devices */
         .safe-pb { padding-bottom: env(safe-area-inset-bottom); }
     </style>
 </head>
@@ -32,15 +31,24 @@
         </div>
     </div>
 
-    <!-- 店長用：通知・PWA設定パネル -->
-    <div id="admin-panel" class="hidden bg-stone-900 text-white p-4 text-[11px] space-y-2">
+    <!-- 店長用：通知設定・テストパネル -->
+    <div id="admin-panel" class="hidden bg-stone-900 text-white p-6 text-sm space-y-4 border-b-4 border-orange-600">
         <div class="flex justify-between items-center">
-            <span class="font-bold text-orange-500">【店長専用モード】</span>
-            <button onclick="this.parentElement.parentElement.remove()" class="text-stone-500">✕</button>
+            <span class="font-black text-orange-500 text-base italic">店長通知設定</span>
+            <button onclick="this.parentElement.parentElement.classList.add('hidden')" class="text-stone-500 bg-stone-800 w-8 h-8 rounded-full">✕</button>
         </div>
-        <p>1. 下のボタンで通知を許可してください。</p>
-        <p>2. ブラウザのメニューから「ホーム画面に追加」してください。アプリとして常駐しやすくなります。</p>
-        <button id="enable-notify-btn" class="w-full bg-orange-600 py-2 rounded-lg font-black mt-1">プッシュ通知を有効にする</button>
+        <div class="space-y-3 bg-stone-800 p-4 rounded-2xl">
+            <p class="text-xs font-bold leading-relaxed">
+                通知が届かない場合は、以下の手順を試してください：<br>
+                1. <span class="text-orange-400">「通知を許可」</span>ボタンを押す<br>
+                2. <span class="text-orange-400">「テスト通知を鳴らす」</span>で確認<br>
+                3. ブラウザのメニューから<span class="text-orange-400">「ホーム画面に追加」</span>してアプリとして開く
+            </p>
+            <div class="grid grid-cols-1 gap-2">
+                <button id="enable-notify-btn" class="w-full bg-orange-600 py-3 rounded-xl font-black text-white shadow-lg shadow-orange-900/50">1. 通知を許可する</button>
+                <button id="test-notify-btn" class="w-full bg-stone-700 py-3 rounded-xl font-black text-white border border-stone-600">2. テスト通知を鳴らす</button>
+            </div>
+        </div>
     </div>
 
     <!-- Header -->
@@ -195,49 +203,75 @@
             onSnapshot(q, (snapshot) => {
                 if (isFirstLoad) {
                     isFirstLoad = false;
+                    console.log("初期データ読み込み完了。監視を開始します。");
                     return;
                 }
                 snapshot.docChanges().forEach((change) => {
                     if (change.type === "added") {
+                        console.log("新着予約を検知:", change.doc.data());
                         triggerNotification(change.doc.data());
                     }
                 });
+            }, (error) => {
+                console.error("監視エラー:", error);
             });
 
             checkAdminStatus();
         }
 
-        // 店長かどうかを簡易判定（通知ボタンの表示制御）
         function checkAdminStatus() {
-            if (location.search.includes('admin=true') || Notification.permission === "default") {
+            // 通知が未許可、または admin=true の場合に設定パネルを表示
+            if (Notification.permission !== "granted" || location.search.includes('admin=true')) {
                 document.getElementById('admin-panel').classList.remove('hidden');
             }
         }
 
-        window.requestNotificationPermission = async () => {
-            const permission = await Notification.requestPermission();
-            if (permission === "granted") {
-                document.getElementById('admin-panel').classList.add('hidden');
-                new Notification("通知有効化", { body: "予約が入るとここにお知らせします" });
-            }
-        };
-        document.getElementById('enable-notify-btn').onclick = window.requestNotificationPermission;
-
-        function triggerNotification(data) {
+        // 通知と音を鳴らす本体
+        function triggerNotification(data, isTest = false) {
+            const title = isTest ? "【テスト】通知チェック" : "【新着予約】";
+            const body = isTest ? "通知と音が正しく鳴っています。" : `${data.name}様 / ${data.time}受取 / ¥${data.total}`;
+            
             if (Notification.permission === "granted") {
-                const n = new Notification("【新着予約】", {
-                    body: `${data.name}様 / ${data.time}受取 / ¥${data.total}`,
+                const n = new Notification(title, {
+                    body: body,
                     icon: "https://cdn-icons-png.flaticon.com/512/3063/3063822.png",
-                    tag: "new-order",
-                    renotify: true
+                    tag: isTest ? "test" : "new-order",
+                    renotify: true,
+                    silent: false // 音を鳴らす設定を明示
                 });
                 
+                // 通知音（控えめなチャイム音）
                 const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
-                audio.play().catch(() => console.log("Audio needs interaction"));
+                audio.play().catch(e => console.log("オーディオ再生がブロックされました。ブラウザでサイトの音設定を確認してください。"));
                 
-                n.onclick = () => { window.focus(); };
+                n.onclick = () => {
+                    window.focus();
+                    n.close();
+                };
+            } else {
+                console.log("通知許可がありません");
             }
         }
+
+        // 通知許可ボタン
+        document.getElementById('enable-notify-btn').onclick = async () => {
+            const permission = await Notification.requestPermission();
+            if (permission === "granted") {
+                triggerNotification(null, true);
+                document.getElementById('admin-panel').classList.add('hidden');
+            } else {
+                alert("通知が拒否されました。ブラウザの設定から通知を許可してください。");
+            }
+        };
+
+        // テスト通知ボタン
+        document.getElementById('test-notify-btn').onclick = () => {
+            if (Notification.permission === "granted") {
+                triggerNotification(null, true);
+            } else {
+                alert("先に「通知を許可する」を押してください。");
+            }
+        };
 
         function renderMenu() {
             const container = document.getElementById('menu-container');
