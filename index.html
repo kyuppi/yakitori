@@ -136,7 +136,7 @@
         const appId = 'yakitori-himawari-main';
         
         // --- GAS連携用の設定 ---
-        const GAS_URL = "https://script.google.com/macros/s/AKfycbx2UF-39J9c2OdodjT-7ATmQrilEDHGK-yutsnFgvf8Lj4K8K8yk2YrJakSQZxS_I1bFA/exec";
+        const GAS_URL = "https://script.google.com/macros/s/AKfycbz9DotsLE7zdamEuWJL10OLF5OFlVrJaNnH1u6AoyWOuakWCmxmjsfUYTRdgzleUAZppg/exec";
 
         const MENU_ITEMS = [
             { id: 'm1', name: 'ねぎま', price: 140 }, { id: 'm2', name: '焼き鳥', price: 140 },
@@ -240,17 +240,16 @@
             const reservationData = {
                 orderId, name, phone, date, time,
                 location: document.getElementById('location-text').innerText,
-                itemsList: readableItems, // GASに送る用の読みやすい配列
+                itemsList: readableItems,
                 total,
                 createdAt: serverTimestamp()
             };
 
             try {
-                // 1. Firestoreへ保存
+                // 1. Firestore
                 await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'reservations'), reservationData);
 
-                // 2. GASへメール通知（中継サーバーとして送信）
-                // mode: 'no-cors' を指定することで、ブラウザ側のセキュリティブロックを回避します
+                // 2. GAS (Gmail Notification)
                 fetch(GAS_URL, {
                     method: 'POST',
                     mode: 'no-cors',
