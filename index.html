@@ -27,27 +27,7 @@
     <div id="loading-overlay" class="fixed inset-0 bg-white/80 backdrop-blur-sm z-[100] flex items-center justify-center hidden">
         <div class="flex flex-col items-center gap-3">
             <div class="loading-spinner"></div>
-            <p class="text-[10px] font-black text-orange-600 tracking-widest uppercase">Processing...</p>
-        </div>
-    </div>
-
-    <!-- 店長用：通知設定・テストパネル -->
-    <div id="admin-panel" class="hidden bg-stone-900 text-white p-6 text-sm space-y-4 border-b-4 border-orange-600">
-        <div class="flex justify-between items-center">
-            <span class="font-black text-orange-500 text-base italic">店長通知設定</span>
-            <button onclick="this.parentElement.parentElement.classList.add('hidden')" class="text-stone-500 bg-stone-800 w-8 h-8 rounded-full">✕</button>
-        </div>
-        <div class="space-y-3 bg-stone-800 p-4 rounded-2xl">
-            <p class="text-xs font-bold leading-relaxed">
-                通知が届かない場合は、以下の手順を試してください：<br>
-                1. <span class="text-orange-400">「通知を許可」</span>ボタンを押す<br>
-                2. <span class="text-orange-400">「テスト通知を鳴らす」</span>で確認<br>
-                3. ブラウザのメニューから<span class="text-orange-400">「ホーム画面に追加」</span>してアプリとして開く
-            </p>
-            <div class="grid grid-cols-1 gap-2">
-                <button id="enable-notify-btn" class="w-full bg-orange-600 py-3 rounded-xl font-black text-white shadow-lg shadow-orange-900/50">1. 通知を許可する</button>
-                <button id="test-notify-btn" class="w-full bg-stone-700 py-3 rounded-xl font-black text-white border border-stone-600">2. テスト通知を鳴らす</button>
-            </div>
+            <p class="text-[10px] font-black text-orange-600 tracking-widest uppercase italic">送信中...</p>
         </div>
     </div>
 
@@ -84,18 +64,12 @@
                         <i data-lucide="clock-3" class="absolute left-4 top-1/2 -translate-y-1/2 text-stone-300 w-5 h-5"></i>
                         <select id="order-time" required class="w-full pl-12 pr-4 py-4 bg-stone-50 rounded-2xl font-bold border-none focus:ring-2 focus:ring-orange-500 transition-all text-sm appearance-none">
                             <option value="">受取時間</option>
-                            <option value="16:30">16:30</option>
-                            <option value="16:45">16:45</option>
-                            <option value="17:00">17:00</option>
-                            <option value="17:15">17:15</option>
-                            <option value="17:30">17:30</option>
-                            <option value="17:45">17:45</option>
-                            <option value="18:00">18:00</option>
-                            <option value="18:15">18:15</option>
-                            <option value="18:30">18:30</option>
-                            <option value="18:45">18:45</option>
-                            <option value="19:00">19:00</option>
-                            <option value="19:15">19:15</option>
+                            <option value="16:30">16:30</option><option value="16:45">16:45</option>
+                            <option value="17:00">17:00</option><option value="17:15">17:15</option>
+                            <option value="17:30">17:30</option><option value="17:45">17:45</option>
+                            <option value="18:00">18:00</option><option value="18:15">18:15</option>
+                            <option value="18:30">18:30</option><option value="18:45">18:45</option>
+                            <option value="19:00">19:00</option><option value="19:15">19:15</option>
                             <option value="19:30">19:30</option>
                         </select>
                     </div>
@@ -116,12 +90,6 @@
         </section>
 
         <section class="space-y-4">
-            <div class="flex items-center justify-between px-2">
-                <div class="flex items-center gap-2">
-                    <i data-lucide="clock" class="text-orange-600 w-4 h-4"></i>
-                    <h3 class="font-black text-xs uppercase tracking-widest text-stone-400">お品書き</h3>
-                </div>
-            </div>
             <div id="menu-container" class="grid gap-3"></div>
         </section>
     </main>
@@ -133,7 +101,8 @@
                 <i data-lucide="check-circle" class="w-10 h-10"></i>
             </div>
             <h2 class="text-2xl font-black mb-2">予約完了！</h2>
-            <p id="display-order-id" class="text-4xl font-black text-stone-900 tracking-widest mb-8">#----</p>
+            <p id="display-order-id" class="text-4xl font-black text-stone-900 tracking-widest mb-4">#----</p>
+            <p class="text-xs text-stone-400 font-bold mb-8 italic uppercase tracking-widest">Mail Sent to Shop</p>
             <button onclick="location.reload()" class="w-full bg-stone-900 text-white font-black py-4 rounded-2xl">戻る</button>
         </div>
     </div>
@@ -151,7 +120,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, doc, onSnapshot, serverTimestamp, query, limit, orderBy } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, doc, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyBFHd2b0KlHvpgMi-oax7llhNaQV-yiLq8",
@@ -165,6 +134,9 @@
         const auth = getAuth(app);
         const db = getFirestore(app);
         const appId = 'yakitori-himawari-main';
+        
+        // --- GAS連携用の設定 ---
+        const GAS_URL = "https://script.google.com/macros/s/AKfycbx2UF-39J9c2OdodjT-7ATmQrilEDHGK-yutsnFgvf8Lj4K8K8yk2YrJakSQZxS_I1bFA/exec";
 
         const MENU_ITEMS = [
             { id: 'm1', name: 'ねぎま', price: 140 }, { id: 'm2', name: '焼き鳥', price: 140 },
@@ -180,15 +152,10 @@
         let cart = {};
         let soldOutItems = {};
         let holidays = [];
-        let isFirstLoad = true;
 
-        onAuthStateChanged(auth, (u) => { 
-            if (!u) signInAnonymously(auth); 
-            else startSync(); 
-        });
+        onAuthStateChanged(auth, (u) => { if (!u) signInAnonymously(auth); else startSync(); });
 
         function startSync() {
-            // 在庫と休日
             onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'inventory', 'status'), (snap) => {
                 soldOutItems = snap.exists() ? snap.data().soldOut || {} : {};
                 renderMenu();
@@ -197,88 +164,14 @@
                 holidays = snap.exists() ? snap.data().dates || [] : [];
                 updateUI();
             });
-
-            // 通知監視（店長用）
-            const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'reservations'), orderBy('createdAt', 'desc'), limit(1));
-            onSnapshot(q, (snapshot) => {
-                if (isFirstLoad) {
-                    isFirstLoad = false;
-                    console.log("初期データ読み込み完了。監視を開始します。");
-                    return;
-                }
-                snapshot.docChanges().forEach((change) => {
-                    if (change.type === "added") {
-                        console.log("新着予約を検知:", change.doc.data());
-                        triggerNotification(change.doc.data());
-                    }
-                });
-            }, (error) => {
-                console.error("監視エラー:", error);
-            });
-
-            checkAdminStatus();
         }
-
-        function checkAdminStatus() {
-            // 通知が未許可、または admin=true の場合に設定パネルを表示
-            if (Notification.permission !== "granted" || location.search.includes('admin=true')) {
-                document.getElementById('admin-panel').classList.remove('hidden');
-            }
-        }
-
-        // 通知と音を鳴らす本体
-        function triggerNotification(data, isTest = false) {
-            const title = isTest ? "【テスト】通知チェック" : "【新着予約】";
-            const body = isTest ? "通知と音が正しく鳴っています。" : `${data.name}様 / ${data.time}受取 / ¥${data.total}`;
-            
-            if (Notification.permission === "granted") {
-                const n = new Notification(title, {
-                    body: body,
-                    icon: "https://cdn-icons-png.flaticon.com/512/3063/3063822.png",
-                    tag: isTest ? "test" : "new-order",
-                    renotify: true,
-                    silent: false // 音を鳴らす設定を明示
-                });
-                
-                // 通知音（控えめなチャイム音）
-                const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
-                audio.play().catch(e => console.log("オーディオ再生がブロックされました。ブラウザでサイトの音設定を確認してください。"));
-                
-                n.onclick = () => {
-                    window.focus();
-                    n.close();
-                };
-            } else {
-                console.log("通知許可がありません");
-            }
-        }
-
-        // 通知許可ボタン
-        document.getElementById('enable-notify-btn').onclick = async () => {
-            const permission = await Notification.requestPermission();
-            if (permission === "granted") {
-                triggerNotification(null, true);
-                document.getElementById('admin-panel').classList.add('hidden');
-            } else {
-                alert("通知が拒否されました。ブラウザの設定から通知を許可してください。");
-            }
-        };
-
-        // テスト通知ボタン
-        document.getElementById('test-notify-btn').onclick = () => {
-            if (Notification.permission === "granted") {
-                triggerNotification(null, true);
-            } else {
-                alert("先に「通知を許可する」を押してください。");
-            }
-        };
 
         function renderMenu() {
             const container = document.getElementById('menu-container');
             container.innerHTML = MENU_ITEMS.map(item => {
                 const isSoldOut = soldOutItems[item.id];
                 return `
-                    <div class="bg-white rounded-3xl border border-stone-200 p-5 relative transition-all ${isSoldOut ? 'opacity-50 grayscale-[0.5]' : ''}">
+                    <div class="bg-white rounded-3xl border border-stone-200 p-5 relative transition-all ${isSoldOut ? 'opacity-50' : ''}">
                         <h4 class="font-black text-lg">${item.name} <span class="text-orange-600 text-sm ml-2 font-bold">¥${item.price}</span></h4>
                         <div class="grid grid-cols-3 gap-2 mt-4">
                             ${FLAVORS.map(flavor => {
@@ -295,7 +188,7 @@
                                     </div>`;
                             }).join('')}
                         </div>
-                        ${isSoldOut ? '<div class="absolute inset-0 bg-white/40 backdrop-blur-[1px] rounded-3xl flex items-center justify-center font-black text-red-600 tracking-widest text-xl rotate-[-5deg] pointer-events-none">SOLD OUT</div>' : ''}
+                        ${isSoldOut ? '<div class="absolute inset-0 bg-white/40 backdrop-blur-[1px] rounded-3xl flex items-center justify-center font-black text-red-600 text-lg rotate-[-5deg]">売り切れ</div>' : ''}
                     </div>`;
             }).join('');
         }
@@ -314,47 +207,12 @@
                 total += item.price * qty;
             });
             document.getElementById('total-price').innerText = `¥${total.toLocaleString()}`;
-
             const dateInput = document.getElementById('order-date').value;
             const timeInput = document.getElementById('order-time').value;
-            const locationBox = document.getElementById('location-box');
-            const locationIcon = document.getElementById('location-icon');
             const locationText = document.getElementById('location-text');
-            const submitBtn = document.getElementById('submit-btn');
-
-            let locationName = '日付を選択してください';
-            let isInvalid = true;
-
-            if (dateInput) {
-                if (holidays.includes(dateInput)) {
-                    locationName = '【臨時定休日】です';
-                    isInvalid = true;
-                } else {
-                    const day = new Date(dateInput).getDay();
-                    locationName = SCHEDULE[day] || '定休日です';
-                    isInvalid = locationName.includes('定休日');
-                }
-            }
-
-            locationText.innerText = locationName;
-            
-            if (isInvalid && dateInput) {
-                locationBox.classList.remove('bg-orange-50', 'border-orange-100', 'text-orange-900');
-                locationBox.classList.add('bg-red-50', 'border-red-100', 'text-red-900');
-                if (locationIcon) {
-                    locationIcon.classList.remove('text-orange-600');
-                    locationIcon.classList.add('text-red-600');
-                }
-            } else {
-                locationBox.classList.remove('bg-red-50', 'border-red-100', 'text-red-900');
-                locationBox.classList.add('bg-orange-50', 'border-orange-100', 'text-orange-900');
-                if (locationIcon) {
-                    locationIcon.classList.remove('text-red-600');
-                    locationIcon.classList.add('text-orange-600');
-                }
-            }
-
-            submitBtn.disabled = total === 0 || !dateInput || !timeInput || isInvalid;
+            const day = dateInput ? new Date(dateInput).getDay() : null;
+            locationText.innerText = dateInput ? (SCHEDULE[day] || '定休日です') : '日付を選択してください';
+            document.getElementById('submit-btn').disabled = total === 0 || !dateInput || !timeInput || locationText.innerText.includes('定休日');
             renderMenu();
         }
 
@@ -368,23 +226,37 @@
             const time = document.getElementById('order-time').value;
 
             if (!name || !phone) return alert('お名前と電話番号を入力してください');
-            
             document.getElementById('loading-overlay').classList.remove('hidden');
+
             const orderId = Math.floor(1000 + Math.random() * 9000).toString();
             let total = 0;
+            const readableItems = [];
             Object.entries(cart).forEach(([key, qty]) => {
                 const item = MENU_ITEMS.find(m => m.id === key.split('-')[0]);
                 total += item.price * qty;
+                readableItems.push(`${item.name}(${key.split('-')[1]}) x${qty}`);
             });
 
+            const reservationData = {
+                orderId, name, phone, date, time,
+                location: document.getElementById('location-text').innerText,
+                itemsList: readableItems, // GASに送る用の読みやすい配列
+                total,
+                createdAt: serverTimestamp()
+            };
+
             try {
-                await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'reservations'), {
-                    orderId, name, phone, date, time,
-                    location: document.getElementById('location-text').innerText,
-                    items: cart,
-                    total,
-                    createdAt: serverTimestamp()
-                });
+                // 1. Firestoreへ保存
+                await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'reservations'), reservationData);
+
+                // 2. GASへメール通知（中継サーバーとして送信）
+                // mode: 'no-cors' を指定することで、ブラウザ側のセキュリティブロックを回避します
+                fetch(GAS_URL, {
+                    method: 'POST',
+                    mode: 'no-cors',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(reservationData)
+                }).catch(e => console.error("Mail Notification Dispatch Error:", e));
 
                 document.getElementById('display-order-id').innerText = `#${orderId}`;
                 document.getElementById('main-content').classList.add('hidden');
@@ -393,7 +265,7 @@
                 window.scrollTo(0,0);
             } catch (e) {
                 console.error(e);
-                alert("予約に失敗しました。");
+                alert("予約に失敗しました。再度お試しください。");
             } finally {
                 document.getElementById('loading-overlay').classList.add('hidden');
             }
